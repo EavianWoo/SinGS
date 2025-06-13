@@ -1,4 +1,4 @@
-![](./assets/dynamic_logs.gif)
+![](./assets/dynamic_logo.gif)
 
 # Paper & Page Links
 
@@ -6,7 +6,7 @@
 
 [![arXiv](https://img.shields.io/badge/arXiv-2406.12345-b31b1b.svg)](https://openaccess.thecvf.com/content/CVPR2025/papers/Wu_SinGS_Animatable_Single-Image_Human_Gaussian_Splats_with_Kinematic_Priors_CVPR_2025_paper.pdf)	[![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://github.com/EavianWoo/singsPage)	[![Video](https://img.shields.io/badge/Video-Demo-red)](https://www.youtube.com/watch?v=2NVqoVNVmjY&t=13s)
 
-![Animation Result](./assets/FinalAnim.mp4)
+![Animation Result](./assets/LowAnim.mp4)
 
 
 
