@@ -1,0 +1,297 @@
+import os
+import cv2
+import json
+import shutil
+import argparse
+import warnings
+
+from torch.utils.data import DataLoader
+
+from demo.utils import *
+from demo.dataset import MultiPeopleDataset
+from score_hmr.utils import *
+from score_hmr.configs import model_config
+from score_hmr.utils.geometry import aa_to_rotmat
+from score_hmr.models.model_utils import load_diffusion_model, load_pare
+from score_hmr.utils.mesh_renderer import MeshRenderer
+
+warnings.filterwarnings('ignore')
+
+from pytorch3d.transforms import matrix_to_axis_angle
+
+
+LIGHT_BLUE=(0.65098039,  0.74117647,  0.85882353)
+NUM_SAMPLES = 1
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input_path", type=str, default="example_data/videos/breakdancing.mp4", help="Path of the input video or image folder.")
+    parser.add_argument("-o", "--out_folder", type=str, default="demo_out/videos", help="Path to save the output video.")
+    parser.add_argument("--overwrite", action="store_true", default=False, help="If set, overwrite the 4D-Human tracklets.")
+    parser.add_argument('--save_mesh', action='store_true', default=False, help='If set, save meshes to disk.')
+    parser.add_argument("--fps", type=int, default=30, help="Frame rate to save the output video.")
+    args = parser.parse_args()
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    
+
+    OUT_DIR = args.out_folder
+    
+    img_dir = None
+    # Extract the frames of the input video.
+    if os.path.isdir(args.input_path):
+        if args.input_path.endswith('/'):
+            args.input_path = args.input_path[:-1]
+            print('input', args.input_path)
+
+        filename = os.path.basename(args.input_path)
+        src_img_dir = os.path.join(args.input_path, 'images')
+        img_dir = os.path.join(OUT_DIR, 'images', filename)
+        os.makedirs(img_dir, exist_ok=True)
+        
+        # copy jpg files to avoid lib alteration
+        files = os.listdir(src_img_dir)
+        jpg_files = [f for f in files if f.lower().endswith(('.jpg', '.jpeg'))]
+        png_files = [f for f in files if f.lower().endswith('.png')]
+        
+        if len(jpg_files) == 0:
+            assert len(png_files) > 0, f'No jpg or png file found in video directory.'
+            
+            print('Copy temp jpg image...')
+            for png_file in png_files:
+                img = cv2.imread(os.path.join(src_img_dir, png_file))
+                copy_path = os.path.join(img_dir, png_file.replace('.png', '.jpg'))
+                cv2.imwrite(copy_path, img)
+
+    elif args.input_path.endswith('.mp4'):
+        video_name = os.path.basename(args.input_path)
+        filename, _ = os.path.splitext(video_name)
+        img_dir = f'{OUT_DIR}/images/{filename}'
+        video_to_frames(path=args.input_path, out_dir=img_dir, fps=args.fps)
+    
+    # Detects shots, runs 4D-Humans tracking, detects 2D with ViTPose, and prepares all necessary files.
+    process_seq(out_root=OUT_DIR, seq=args.input_path, img_dir=img_dir, overwrite=args.overwrite)
+    
+    # Get the number of shots in the video.
+    shots_path = f'{OUT_DIR}/shot_idcs/{filename}.json'
+    with open(shots_path, "r") as f:
+        shots_dict = json.load(f)
+    num_shots = max(shots_dict.values())
+
+
+    # -------------------- #
+    ### Prepare ScoreHMR ###
+
+    # Load config.
+    model_cfg = model_config()
+
+    # Load PARE model.
+    pare = load_pare(model_cfg.SMPL).to(device)
+    pare.eval()
+
+    img_feat_standarizer = StandarizeImageFeatures(
+        backbone=model_cfg.MODEL.DENOISING_MODEL.IMG_FEATS,
+        use_betas=False,
+        device=device,
+    )
+
+    # Load diffusion model.
+    extra_args = {
+        "keypoint_guidance": True,
+        "temporal_guidance": False,
+        "use_default_ckpt": True,
+        "device": device,
+    }
+    diffusion_model = load_diffusion_model(model_cfg, **extra_args)
+
+    # ----------------------------------------
+
+
+    # Set up renderer.
+    renderer = MeshRenderer(model_cfg, faces=diffusion_model.smpl.faces)
+
+
+    ## in order to save
+    smpl_shape = []
+    smpl_global_orient = []
+    smpl_pose = []
+    smpl_trans = []
+
+    ## Iterate over shots in the video ##
+
+    for shot_idx in range(num_shots+1):
+        data_sources = {
+            "images": f"{OUT_DIR}/images/{filename}",
+            "tracks": f"{OUT_DIR}/track_preds/{filename}",
+            "shots": f"{OUT_DIR}/shot_idcs/{filename}.json",
+        }
+
+        # Create dataset.
+        dataset = MultiPeopleDataset(data_sources=data_sources, seq_name=filename, shot_idx=shot_idx)
+
+        # Ignore shots with no tracklets or not long enough tracklets.
+        if len(dataset.track_ids) <= 0 or dataset.num_imgs <= 20:
+            continue
+
+        B = len(dataset)     # number of people
+        T = dataset.seq_len  # number of frames
+        loader = DataLoader(dataset, batch_size=B, shuffle=False)
+
+        obs_data = recursive_to(next(iter(loader)), device)
+
+        num_tracks = obs_data["track_id"].size(0)
+        pred_cam_t_all = torch.zeros((B, T, 3))
+        pred_vertices_all = torch.zeros((B, T, 6890, 3))
+
+
+        ## Iterate over tracklets ##
+
+        for track_idx in range(num_tracks):
+            # Get the the data for the current tracklet.
+            batch = slice_dict(obs_data, track_idx)
+            start_idx, end_idx = batch["track_interval"]
+            start_idx = start_idx.item()
+            end_idx = end_idx.item()
+
+            # Keep only the valid data of the tracklet.
+            batch = slice_dict_start_end(batch, start_idx, end_idx)
+            batch_size = batch["keypoints_2d"].size(0)
+            batch["img_size"] = (
+                torch.Tensor(dataset.img_size)
+                .unsqueeze(0)
+                .repeat(batch_size, 1)
+                .to(device)
+            )
+            batch["camera_center"] = batch["img_size"] / 2
+            global_orient_rotmat = aa_to_rotmat(batch["init_root_orient"]).reshape(batch_size, -1, 3, 3)
+            body_pose_rotmat = aa_to_rotmat(batch["init_body_pose"].reshape(-1, 3)).reshape(batch_size, -1, 3, 3)
+            batch["pred_pose"] = torch.cat((global_orient_rotmat, body_pose_rotmat), dim=1)
+            focal_length = model_cfg.EXTRA.FOCAL_LENGTH * torch.ones(
+                batch_size,
+                2,
+                device=device,
+                dtype=batch["keypoints_2d"].dtype,
+            )
+            batch["focal_length"] = focal_length
+
+            # Get PARE image features.
+            with torch.no_grad():
+                pare_out = pare(batch["img"], get_feats=True)
+            cond_feats = pare_out["pose_feats"].reshape(batch_size, -1)
+            cond_feats = img_feat_standarizer(cond_feats) # normalize image features
+
+            batch["init_cam_t"] = batch["pred_cam_t"]
+            batch["joints_2d"] = batch["keypoints_2d"][:, :, :2]
+            batch["joints_conf"] = batch["keypoints_2d"][:, :, [2]]
+
+            # Iterative refinement with ScoreHMR.
+            print(f'=> Running ScoreHMR for tracklet {track_idx+1}/{num_tracks}')
+            with torch.no_grad():
+                dm_out = diffusion_model.sample(
+                    batch, cond_feats, batch_size=batch_size * NUM_SAMPLES
+                )
+
+            print('betas', batch["pred_betas"].shape)
+            print('mean_betas', batch["pred_betas"].mean(dim=0, keepdim=True).expand(batch_size, -1).shape)
+            pred_smpl_params = prepare_smpl_params(
+                dm_out['x_0'],
+                num_samples = NUM_SAMPLES,
+                use_betas = False,
+                # pred_betas=batch["pred_betas"], ### mentioned in paper, no betas fed to dm.
+                pred_betas=batch["pred_betas"].mean(dim=0, keepdim=True).expand(batch_size, -1),
+            )
+            smpl_out = diffusion_model.smpl(**pred_smpl_params, pose2rot=False)
+            pred_cam_t_all[track_idx, start_idx:end_idx] = dm_out['camera_translation'].cpu()
+            pred_vertices_all[track_idx, start_idx:end_idx] = smpl_out.vertices.cpu()
+
+            # ----------------------- #
+            ### save data for SinGS ###
+            # smpl
+            smpl_shape.append(batch['pred_betas'])
+            smpl_global_orient.append(pred_smpl_params['global_orient'])
+            smpl_pose.append(pred_smpl_params['body_pose'])
+            smpl_trans.append(dm_out['camera_translation'])
+
+            # Save meshes as OBJ files.
+            if args.save_mesh:
+                verts = smpl_out.vertices.cpu().numpy()
+                cam_t = dm_out['camera_translation'].cpu().numpy()
+                person_id = str(batch['track_id'].item()).zfill(3)
+                tmesh_path = f"{OUT_DIR}/mesh_output/{filename}/{person_id}"
+                print(f'=> Saving mesh files for {person_id} in {tmesh_path}')
+                os.makedirs(tmesh_path, exist_ok=True)
+                for ii, (vvv, ttt) in enumerate(zip(verts, cam_t)):
+                    tmesh = renderer.vertices_to_trimesh(vvv, ttt, LIGHT_BLUE)
+                    frame_id = str(ii + start_idx + 1).zfill(6)
+                    tmesh.export(f'{tmesh_path}/{frame_id}.obj')
+
+
+        # Save output video.
+        frame_list = create_visuals(
+            renderer,
+            pred_vertices_all.numpy(),
+            pred_cam_t_all.numpy(),
+            dataset.sel_img_paths,
+        )
+
+        height, width, _ = frame_list[0].shape
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        os.makedirs(f"{OUT_DIR}", exist_ok=True)
+        video_writer = cv2.VideoWriter(
+            f"{OUT_DIR}/{filename}_{shot_idx}.mp4",
+            fourcc,
+            args.fps,
+            (width, height),
+        )
+        for frame in frame_list:
+            video_writer.write(cv2.convertScaleAbs(frame))
+        video_writer.release()
+
+
+        ### format transformation
+        smpl_shape = torch.cat(smpl_shape)
+        smpl_global_orient = torch.cat(smpl_global_orient)
+        smpl_pose = torch.cat(smpl_pose)
+        smpl_trans = torch.cat(smpl_trans)
+        smpl_global_orient = matrix_to_axis_angle(smpl_global_orient)
+        smpl_pose = matrix_to_axis_angle(smpl_pose)
+
+        pose_dict = {'betas': smpl_shape.mean(0).detach().cpu().numpy(),
+                    'global_orient': smpl_global_orient.reshape(-1,3).detach().cpu().numpy(),
+                    'body_pose': smpl_pose.reshape(-1,69).detach().cpu().numpy(),
+                    'transl': smpl_trans.squeeze(1).detach().cpu().numpy()}
+        # print('betas_diff', smpl_shape - smpl_shape.mean(0))
+
+    
+        save_path = os.path.join(OUT_DIR, 'score_demo_video')
+        os.makedirs(save_path, exist_ok=True)
+        np.savez_compressed(os.path.join(save_path, "poses.npz"), **pose_dict)
+
+        focal = batch["focal_length"][0].squeeze().detach().cpu().numpy()
+        center = batch["camera_center"][0].squeeze().detach().cpu().numpy()
+
+        K = np.eye(3)
+        K[0, 0], K[1, 1] = focal[0], focal[1]
+        K[0, 2], K[1, 2] = center[0], center[1]
+
+
+        # print('img_size', dataset.img_size) # tuple
+        cam_dict = {
+            "intrinsic": K,
+            "extrinsic": np.eye(4),
+            "height": np.array(dataset.img_size[1]),
+            "width": np.array(dataset.img_size[0]),
+        }
+
+        np.savez_compressed(os.path.join(save_path, "cameras.npz"), **cam_dict)
+
+        # clean tmp dir
+        shutil.rmtree(img_dir)
+        shutil.rmtree(os.path.join(OUT_DIR, "shot_idcs"))
+        shutil.rmtree(os.path.join(OUT_DIR, "phalp_out"))
+        shutil.rmtree(os.path.join(OUT_DIR, "track_preds"))
+                 
+        
+
+if __name__ == "__main__":
+    main()

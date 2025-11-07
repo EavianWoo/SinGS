@@ -1,0 +1,17 @@
+{
+    "head-neck": 0,
+    "spine": 1,
+    "leftUpArm": 2,
+    "rightUpArm": 3,
+    "leftDownArm": 4,
+    "rightDownArm": 5, 
+    "leftHand": 6,
+    "rightHand": 7,
+    "hips": 8,
+    "leftUpLeg": 9,
+    "rightUpLeg": 10,
+    "leftDownLeg": 11,
+    "rightDownLeg": 12,
+    "leftFoot": 13,
+    "rightFoot": 14
+}

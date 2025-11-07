@@ -1,0 +1,8 @@
+motion_src: './data/animation/custom/output_motions_kunkun.npz'
+motion_type: custom
+motion_start: 0
+motion_end: -1
+motion_skip: 2
+
+render_size: [512, 512]
+image_zoom_ratio: 1.0

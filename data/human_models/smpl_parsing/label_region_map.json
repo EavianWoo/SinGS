@@ -1,0 +1,17 @@
+{
+    "0": ["head", "neck"],
+    "1": ["spine", "spine1", "spine2"],
+    "2": ["leftShoulder", "leftArm"],
+    "3": ["rightShoulder", "rightArm"],
+    "4": ["leftForeArm"],
+    "5": ["rightForeArm"], 
+    "6": ["leftHand", "leftHandIndex1"],
+    "7": ["rightHand", "rightHandIndex1"],
+    "8": ["hips"],
+    "9": ["leftUpLeg"],
+    "10": ["rightUpLeg"],
+    "11": ["leftLeg"],
+    "12": ["rightLeg"],
+    "13": ["leftFoot", "leftToeBase"],
+    "14": ["rightFoot",  "rightToeBase"]
+}

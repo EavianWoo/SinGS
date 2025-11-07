@@ -1,0 +1,154 @@
+seed: 0
+mode: human # single_test # batch_test
+exp_name: v_release
+detect_anomaly: false
+debug: false
+wandb: false
+eval: false
+bg_color: white
+
+anim_cfg_path: "./sings/rec/cfgs/anim/custom.yaml"
+
+dataset:
+  root_dir: ""
+  batch: "test_batch"
+  name: "m_2"
+  seq: ""
+output_path: output
+
+
+train:
+  batch_size: 1
+  num_workers: 0
+  init_steps: 500
+  num_steps: 8999
+  save_ckpt_interval: 5000
+  val_interval: 3000
+  viz_interval: 3000
+  anim_interval: 3000
+  save_progress_images: false
+  progress_save_interval: 100
+
+human:
+  name: sings_hybrid
+  ckpt: null
+  sh_degree: 0
+  n_subdivision: 2
+  disable_posedirs: true
+
+  kplanes: 
+      grid_dimensions: 2
+      input_coordinate_dim: 3
+      output_coordinate_dim: 32
+      resolution: [64, 64, 64]
+      multires: [1, 2, 4]
+
+  feature_dim: 32
+  optim_pose: true
+  optim_betas: false
+  optim_trans: true
+  optim_eps_offsets: false
+  activation: relu
+  canon_nframes: 60
+  canon_pose_type: da_pose
+  
+  body_template: 'smplh' # 'smpl' # TODO 'smplx' 
+  refine_level: false # disabled
+  num_gs_level: 1 # disabled
+
+  # warm up
+  opt_geo_from: 300 # 500
+  opt_geo_until: 8500
+  opt_app_from: 500 # supposed to be after geo
+  opt_app_until: 9000
+
+  lr:
+    position: 0.00016
+    position_init: 0.00016
+    position_final: 1.6e-06
+    position_delay_mult: 0.01
+    position_max_steps: 16000
+
+    feature: 0.0025
+    smpl_spatial: 2.0
+    smpl_pose: 0.0001
+    smpl_betas: 0.0001
+    smpl_trans: 0.0001
+    smpl_eps_offset: 0.0001
+    percent_dense: 0.01
+    appearance: 0.0005
+    geometry: 0.0005
+    vembed: 0.0005
+    pose: 0.0005
+    mlp_max_steps: 16000
+
+
+  attribute_control:
+    isotropic: true 
+    thickness_factor: 1.0 ##
+    init_opacity: 0.8 # 0.8 - 0.16, 0.9 - 0.09, 0.95 - 0.0475, 0.99 - 0.0099
+    init_scale_multiplier: 0.25
+    fixed_opacity: false # true ### if not fixing opacity, then enable the following
+    # clip_opacity_from: 14000
+    # os_reset_interval: 2000
+
+  density_control:
+    min_n_gaussians: 100000 ### TODO
+    max_n_gaussians: 200000 ### TODO # the param does not work now!!!
+
+    strategy: 'hybrid' # 'vanilla' # 'hybrid'
+    vanilla: # pcd
+      densification_interval: 1000
+      prune_min_opacity: 0.1
+      densify_extent: 1.0
+      percent_dense: 0.01
+
+    hybrid: # pcd + mesh
+      densify_interval: 1500 # 1000 # 2000
+      densify_from_iter: 3999 # always keep at least one step later than pruning as it didn't update immediately
+      densify_until_iter: 10000 
+      densify_grad_threshold: 0.001 # 0.0002
+      densify_scale_threshold: 0.005
+      densify_render_size_threshold: 20 ### TODO
+
+      prune_interval: 2000
+      prune_from_iter: 1998 # 3998
+      prune_until_iter: 6000 # 10000
+      prune_opacity_threshold: 0.3 # 0.01 ## additional
+      prune_scale_threshold: 0.0005
+      prune_collapse_rate: 0.5 # 0.75
+      prune_max_n_gs_once: 5000
+
+
+  loss:
+    ssim_w: 0.2
+    l1_w: 0.8
+    lpips_w: 1.0
+    num_patches: 4
+    patch_size: 128
+    use_patches: 1
+
+    mesh_edge: 1e4
+    gaussian_connect: 5e3
+    
+    laplacian:
+      type: "standard" 
+      regional: true
+      color_strength: 10. # 5.
+      color_regions_w: {'head-neck': 0., 'spine': 0., 'leftUpArm': 0., 'rightUpArm': 0., 'leftDownArm': 1., 'rightDownArm': 1., 'leftHand': 1., 'rightHand': 1.,
+                      'hips': 0., 'leftUpLeg': 0., 'rightUpLeg': 0., 'leftDownLeg': 0., 'rightDownLeg': 0., 'leftFoot': 0., 'rightFoot': 0.}
+      
+      position_strength: 1000 # 500 # 1000 # 2000
+      position_regions_w: {'head-neck': 0.5, 'spine': 1., 'leftUpArm': 1., 'rightUpArm': 1., 'leftDownArm': 1., 'rightDownArm': 1., 'leftHand': 2., 'rightHand': 2.,
+                      'hips': 1., 'leftUpLeg': 1., 'rightUpLeg': 1., 'leftDownLeg': 1., 'rightDownLeg': 1., 'leftFoot': 0.5, 'rightFoot': 0.5}
+      
+      impose_on: 'anchor' # 'center'
+      impose_from_iter: 1000
+      
+    l2_norm:
+      lambda_xyz_offsets: 0.001
+      lambda_scales_diff: 0.005
+      max_scale_threshold: 0.005
+      lambda_max_scale: 0.005 # 0.001
+      min_opacity_threshold: 0.2
+      lambda_min_opacity: 0.001

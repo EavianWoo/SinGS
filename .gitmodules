@@ -1,0 +1,14 @@
+
+[submodule "preprocess/submodules/AlphaPose"]
+	path = preprocess/submodules/AlphaPose
+	url = https://github.com/MVIG-SJTU/AlphaPose.git
+[submodule "preprocess/submodules/sam2"]
+	path = preprocess/submodules/sam2
+	url = https://github.com/facebookresearch/sam2.git
+	branch = sam2_update/dev_20241211
+[submodule "preprocess/submodules/ScoreHMR"]
+	path = preprocess/submodules/ScoreHMR
+	url = https://github.com/statho/ScoreHMR.git
+[submodule "preprocess/submodules/sapiens"]
+	path = preprocess/submodules/sapiens
+	url = https://github.com/facebookresearch/sapiens.git

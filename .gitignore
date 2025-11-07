@@ -1,0 +1,7 @@
+.vscode
+preprocess/submodules.sh
+output/*
+*.tar.gz
+
+sings/gen
+sings/gen/humanx
