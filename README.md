@@ -15,7 +15,7 @@
 
 **SinGS** creates high-quality, efficient, animatable avatar from just single image input. And this repository provides the official implementation for our paper [ *SinGS: Animatable Single-Image Human Gaussian Splats with Kinematic Priors* ] accepted by **CVPR 2025**.
 
-[![arXiv](https://img.shields.io/badge/arXiv-2406.12345-b31b1b.svg)](https://openaccess.thecvf.com/content/CVPR2025/papers/Wu_SinGS_Animatable_Single-Image_Human_Gaussian_Splats_with_Kinematic_Priors_CVPR_2025_paper.pdf)	[![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://yourdomain.com/project-page)	[![Video](https://img.shields.io/badge/Video-Demo-red)](https://github.com/EavianWoo/singsPage)
+[![arXiv](https://img.shields.io/badge/arXiv-2406.12345-b31b1b.svg)](https://openaccess.thecvf.com/content/CVPR2025/papers/Wu_SinGS_Animatable_Single-Image_Human_Gaussian_Splats_with_Kinematic_Priors_CVPR_2025_paper.pdf)	[![Project Page](https://img.shields.io/badge/Project-Page-blue)](https://eavianwoo.github.io/singsPage/)	[![Video](https://img.shields.io/badge/Video-Demo-red)](https://youtu.be/2NVqoVNVmjY)
 
 ![Animation Result](./assets/LowAnim.gif)
 
